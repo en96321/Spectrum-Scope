@@ -1,10 +1,11 @@
 # Spectrum Scope
 
+<img width="256" height="256" alt="Icon" src="https://github.com/user-attachments/assets/bb106a19-74f9-4577-a376-43f914a7697a" />
+
 **Spectrum Scope** 是一款專為 macOS 設計的原生高解析音訊視覺化工具 (High-Res Audio Visualizer)。
 
 除了精美的頻譜分析外，最核心的功能是 **Lossless Switcher**，能夠偵測 Apple Music 的採樣率變化，並自動同步系統音訊設定，確保 Bit-Perfect 的聆聽體驗。
 
-![App Icon](macos/Runner/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png)
 
 ## 🚀 主要功能
 

@@ -761,7 +761,8 @@ class FullPopoverView: NSView {
         menu.addItem(NSMenuItem.separator())
         
         // 關於
-         let aboutItem = NSMenuItem(title: "關於 Spectrum Scope", action: #selector(aboutClicked), keyEquivalent: "")
+        // 關於
+         let aboutItem = NSMenuItem(title: "關於 Spectrum Scope", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
         menu.addItem(aboutItem)
         
@@ -817,14 +818,11 @@ class FullPopoverView: NSView {
         onQuit?()
     }
     
-    @objc func aboutClicked() {
+    @objc private func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "Spectrum Scope"
-        alert.informativeText = "Version 1.0.0\n\nA High-Res Audio Visualizer for macOS.\n\nDeveloped with ❤️ by Pedro.Yang\n\nSpecial thanks to vincentneo for LosslessSwitcher inspiration."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        // Set icon if available, otherwise default app icon executes
-        alert.icon = NSImage(named: "AppIcon") 
+        alert.messageText = "About Spectrum Scope"
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        alert.informativeText = "Version \(version)\n\nNative High-Res Audio Visualizer for macOS.\n\nDeveloped with ❤️ by Pedro.Yang\n\nSpecial thanks to vincentneo for LosslessSwitcher inspiration."
         alert.runModal()
     }
     

@@ -378,8 +378,11 @@ class MenuBarSpectrumView: NSView {
         super.draw(dirtyRect)
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         switch mode {
-        case .bars, .blocks: drawBars(context)
-        case .wave, .circular, .mirror: drawWave(context)
+        case .bars: drawBars(context)
+        case .wave: drawWave(context)
+        case .circular: drawCircular(context)
+        case .blocks: drawBlocks(context)
+        case .mirror: drawMirror(context)
         }
     }
     
@@ -426,8 +429,89 @@ class MenuBarSpectrumView: NSView {
         context.strokePath()
     }
     
-    // Duplicate helper methods to keep class independent if needed, or rely on shared logic?
-    // Copying helpers for safety.
+    private func drawCircular(_ context: CGContext) {
+        // Optimized for small view: Simple radial bars
+        let pointCount = 12
+        let sampledSpectrum: [Float] = spectrum.isEmpty ? Array(repeating: -60, count: pointCount) : resampleSpectrum(spectrum, targetCount: pointCount)
+        
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let maxRadius = min(bounds.width, bounds.height) / 2
+        let minRadius = maxRadius * 0.4
+        let angleStep = (2 * CGFloat.pi) / CGFloat(pointCount)
+        
+        context.setLineWidth(2)
+        context.setLineCap(.round)
+        
+        for (i, value) in sampledSpectrum.enumerated() {
+            let normalizedHeight = CGFloat((value + 80) / 80).clamped(to: 0...1)
+            let barLength = (maxRadius - minRadius) * normalizedHeight
+            let angle = CGFloat(i) * angleStep - CGFloat.pi / 2
+            
+            let startX = center.x + cos(angle) * minRadius
+            let startY = center.y + sin(angle) * minRadius
+            let endX = center.x + cos(angle) * (minRadius + barLength)
+            let endY = center.y + sin(angle) * (minRadius + barLength)
+            
+            let color = getColorForHeight(normalizedHeight)
+            context.setStrokeColor(color.cgColor)
+            context.move(to: CGPoint(x: startX, y: startY))
+            context.addLine(to: CGPoint(x: endX, y: endY))
+            context.strokePath()
+        }
+    }
+    
+    private func drawBlocks(_ context: CGContext) {
+        // Optimized 3x3 grid for small view
+        let columns = 5
+        let rows = 4
+        let sampledSpectrum: [Float] = spectrum.isEmpty ? Array(repeating: -60, count: columns) : resampleSpectrum(spectrum, targetCount: columns)
+        let blockW = bounds.width / CGFloat(columns)
+        let blockH = bounds.height / CGFloat(rows)
+        let spacing: CGFloat = 1.5
+        
+        for (col, value) in sampledSpectrum.enumerated() {
+            let normalizedHeight = CGFloat((value + 80) / 80).clamped(to: 0...1)
+            let activeRows = max(1, Int(normalizedHeight * CGFloat(rows)))
+            
+            for row in 0..<activeRows {
+                let x = CGFloat(col) * blockW + spacing / 2
+                // Draw from bottom up
+                let y = (bounds.height - blockH * CGFloat(rows)) / 2 + CGFloat(row) * blockH + spacing / 2
+                
+                let heightRatio = CGFloat(row) / CGFloat(rows)
+                let color = getColorForHeight(heightRatio)
+                context.setFillColor(color.cgColor)
+                context.fill(CGRect(x: x, y: y, width: blockW - spacing, height: blockH - spacing))
+            }
+        }
+    }
+    
+    private func drawMirror(_ context: CGContext) {
+        let barCountMirror = 5
+        let barWidth = bounds.width / CGFloat(barCountMirror)
+        let spacing: CGFloat = 1
+        let actualBarWidth = barWidth - spacing
+        let sampledSpectrum: [Float] = spectrum.isEmpty ? [-60, -50, -40, -50, -60] : resampleSpectrum(spectrum, targetCount: barCountMirror)
+        let midY = bounds.midY
+        
+        for (index, value) in sampledSpectrum.enumerated() {
+            let normalizedHeight = CGFloat((value + 80) / 80).clamped(to: 0...1)
+            // Reduced height for mirror effect to fit in bar
+            let barHeight = (bounds.height / 2) * normalizedHeight * 0.9 
+            
+            let x = CGFloat(index) * barWidth + spacing / 2
+            let color = getColorForHeight(normalizedHeight)
+            context.setFillColor(color.cgColor)
+            
+            // Top bar
+            context.fill(CGRect(x: x, y: midY, width: actualBarWidth, height: barHeight))
+            // Bottom bar
+            context.fill(CGRect(x: x, y: midY - barHeight, width: actualBarWidth, height: barHeight))
+        }
+    }
+    
+    // MARK: - Helpers
+    
     private func getColorForHeight(_ height: CGFloat) -> NSColor {
         let colorIndex = Int(height * CGFloat(gradientColors.count - 1))
         let clampedIndex = max(0, min(colorIndex, gradientColors.count - 1))
@@ -636,6 +720,15 @@ class FullPopoverView: NSView {
         losslessItem.target = self
         menu.addItem(losslessItem)
         
+        menu.addItem(NSMenuItem.separator())
+        
+        // 3.1 Status Bar Display Toggle
+        let showSampleRate = SettingsManager.shared.showSampleRateInStatusBar
+        let showRateItem = NSMenuItem(title: "在狀態列顯示取樣率", action: #selector(toggleShowSampleRate(_:)), keyEquivalent: "")
+        showRateItem.state = showSampleRate ? .on : .off
+        showRateItem.target = self
+        menu.addItem(showRateItem)
+        
         // 4. 目標輸出裝置選擇 (Submenu)
         let deviceItem = NSMenuItem(title: "同步設定輸出裝置", action: nil, keyEquivalent: "")
         let deviceMenu = NSMenu()
@@ -694,11 +787,21 @@ class FullPopoverView: NSView {
     }
     
     @objc func toggleLosslessSwitcher(_ sender: NSMenuItem) {
-        let newState = sender.state == .off
-        SettingsManager.shared.isLosslessSwitcherEnabled = newState
+        let newState = !(sender.state == .on)
         sender.state = newState ? .on : .off
+        SettingsManager.shared.isLosslessSwitcherEnabled = newState
     }
     
+    // Callback closure to update AppDelegate
+    var onToggleShowSampleRate: ((Bool) -> Void)?
+    
+    @objc func toggleShowSampleRate(_ sender: NSMenuItem) {
+        let newState = !(sender.state == .on)
+        sender.state = newState ? .on : .off
+        SettingsManager.shared.showSampleRateInStatusBar = newState
+        onToggleShowSampleRate?(newState)
+    }
+
     @objc func selectTargetDevice(_ sender: NSMenuItem) {
         SettingsManager.shared.targetOutputDeviceID = UInt32(sender.tag)
     }
@@ -760,79 +863,5 @@ class FullPopoverView: NSView {
     }
 }
 
-// MARK: - SettingsManager
 
-class SettingsManager {
-    static let shared = SettingsManager()
-    
-    private let launchAtLoginKey = "launchAtLogin"
-    private let losslessSwitcherKey = "losslessSwitcherEnabled" // default true
-    private let targetDeviceKey = "targetOutputDeviceID" // 0 = system default
-    private let uiRefreshRateKey = "uiRefreshRate" // default 60
-    private let visualizationModeKey = "visualizationMode" // default 0 (bars)
-    
-    var isLaunchAtLoginEnabled: Bool {
-        get {
-            if #available(macOS 13.0, *) {
-                return SMAppService.mainApp.status == .enabled
-            } else {
-                return UserDefaults.standard.bool(forKey: launchAtLoginKey)
-            }
-        }
-        set {
-            if #available(macOS 13.0, *) {
-                do {
-                    if newValue {
-                        try SMAppService.mainApp.register()
-                    } else {
-                        try SMAppService.mainApp.unregister()
-                    }
-                    UserDefaults.standard.set(newValue, forKey: launchAtLoginKey)
-                } catch {
-                    print("❌ Failed to toggle Launch at Login: \(error)")
-                }
-            } else {
-                UserDefaults.standard.set(newValue, forKey: launchAtLoginKey)
-            }
-        }
-    }
-    
-    var visualizationMode: Int {
-        get { return UserDefaults.standard.integer(forKey: visualizationModeKey) }
-        set { UserDefaults.standard.set(newValue, forKey: visualizationModeKey) }
-    }
-    
-    var isLosslessSwitcherEnabled: Bool {
-        get {
-            // Default to true if not set
-            if UserDefaults.standard.object(forKey: losslessSwitcherKey) == nil {
-                return true
-            }
-            return UserDefaults.standard.bool(forKey: losslessSwitcherKey)
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: losslessSwitcherKey)
-        }
-    }
-    
-    var targetOutputDeviceID: UInt32 {
-        get {
-            return UInt32(UserDefaults.standard.integer(forKey: targetDeviceKey))
-        }
-        set {
-            UserDefaults.standard.set(Int(newValue), forKey: targetDeviceKey)
-            print("💾 Target Device Saved: \(newValue)")
-        }
-    }
-    
-    var uiRefreshRate: Int {
-        get {
-            let val = UserDefaults.standard.integer(forKey: uiRefreshRateKey)
-            return val == 0 ? 60 : val // default to 60 if not set
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: uiRefreshRateKey)
-        }
-    }
-}
 

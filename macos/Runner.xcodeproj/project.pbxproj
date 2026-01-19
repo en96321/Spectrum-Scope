@@ -28,6 +28,7 @@
 		1E7FD6F92F19F75C00E2B006 /* AudioInputService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD6EF2F19F75C00E2B006 /* AudioInputService.swift */; };
 		1E7FD6FA2F19F75C00E2B006 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD6F12F19F75C00E2B006 /* AppDelegate.swift */; };
 		1E7FD6FB2F19F75C00E2B006 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD6F22F19F75C00E2B006 /* OnboardingView.swift */; };
+		1E7FD6FC2F19F75C00E2B006 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD6FD2F19F75C00E2B006 /* SettingsManager.swift */; };
 		331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C80D7294CF71000263BE5 /* RunnerTests.swift */; };
 
 		33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F22044A3C60003C045 /* Assets.xcassets */; };
@@ -74,6 +75,7 @@
 		1E7FD6F22F19F75C00E2B006 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		1E7FD6F32F19F75C00E2B006 /* SpectrumAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectrumAnalyzer.swift; sourceTree = "<group>"; };
 		1E7FD6F42F19F75C00E2B006 /* VisualizerViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualizerViews.swift; sourceTree = "<group>"; };
+		1E7FD6FD2F19F75C00E2B006 /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Runner/SettingsManager.swift; sourceTree = SOURCE_ROOT; };
 		2BF5ED5572E42EF0C12A1BAE /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		331C80D5294CF71000263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		331C80D7294CF71000263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
@@ -209,6 +211,7 @@
 				1E7FD6F22F19F75C00E2B006 /* OnboardingView.swift */,
 				1E7FD6F32F19F75C00E2B006 /* SpectrumAnalyzer.swift */,
 				1E7FD6F42F19F75C00E2B006 /* VisualizerViews.swift */,
+				1E7FD6FD2F19F75C00E2B006 /* SettingsManager.swift */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -382,6 +385,7 @@
 				1E7FD6F92F19F75C00E2B006 /* AudioInputService.swift in Sources */,
 				1E7FD6FA2F19F75C00E2B006 /* AppDelegate.swift in Sources */,
 				1E7FD6FB2F19F75C00E2B006 /* OnboardingView.swift in Sources */,
+				1E7FD6FC2F19F75C00E2B006 /* SettingsManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -11,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioInputDelegate {
     // UI Components
     var statusItem: NSStatusItem!
     var menuBarSpectrumView: MenuBarSpectrumView!
+    var sampleRateLabel: NSTextField! // New Label
     var popover: NSPopover!
     var popoverView: FullPopoverView!
     var eventMonitor: Any?
@@ -181,6 +182,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioInputDelegate {
             // 更新 Menu Bar
             self?.menuBarSpectrumView?.updateSpectrum(spectrum)
             
+            // 更新 Sample Rate Label
+            if SettingsManager.shared.showSampleRateInStatusBar {
+                let khz = sampleRate / 1000.0
+                let text = (floor(khz) == khz) ? String(format: "%.0fk", khz) : String(format: "%.1fk", khz)
+                if self?.sampleRateLabel?.stringValue != text {
+                    self?.sampleRateLabel?.stringValue = text
+                    self?.updateStatusBarLayout()
+                }
+            }
+            
             // 更新 Popover
             if let popoverView = self?.popoverView {
                 popoverView.updateSpectrum(spectrum)
@@ -193,17 +204,72 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioInputDelegate {
     // MARK: - UI Setup (Copied & Adapted)
     
     private func setupStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: 36)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.behavior = .removalAllowed
         
         if let button = statusItem.button {
-            menuBarSpectrumView = MenuBarSpectrumView(frame: NSRect(x: 0, y: 4, width: 30, height: 14))
+            // 1. Spectrum View (固定寬度 30)
+            menuBarSpectrumView = MenuBarSpectrumView(frame: NSRect(x: 0, y: 3, width: 30, height: 16))
             if let view = menuBarSpectrumView {
+                // Restore saved mode
+                let savedModeInt = SettingsManager.shared.visualizationMode
+                if let mode = VisualizationMode(rawValue: savedModeInt) {
+                    view.mode = mode
+                }
                 button.addSubview(view)
             }
             
+            // 2. Sample Rate Label (寬度動態，初始隱藏)
+            // 減小 Frame x, 調整 font size 為 9 或 10
+            sampleRateLabel = NSTextField(frame: NSRect(x: 32, y: 5, width: 34, height: 12)) 
+            sampleRateLabel.stringValue = ""
+            sampleRateLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+            sampleRateLabel.textColor = NSColor.secondaryLabelColor
+            sampleRateLabel.isBezeled = false
+            sampleRateLabel.drawsBackground = false
+            sampleRateLabel.isEditable = false
+            sampleRateLabel.isSelectable = false
+            sampleRateLabel.alignment = .left // 靠左緊貼
+            button.addSubview(sampleRateLabel)
+            
             button.action = #selector(togglePopover)
             button.target = self
+            
+            // 初始佈局
+            updateStatusBarLayout()
+        }
+    }
+    
+    private func updateStatusBarLayout() {
+        guard let button = statusItem.button else { return }
+        
+        let showLabel = SettingsManager.shared.showSampleRateInStatusBar
+        sampleRateLabel.isHidden = !showLabel
+        
+        // Define constants for layout
+        let leftPadding: CGFloat = 8
+        let rightPadding: CGFloat = 8
+        let spacing: CGFloat = 4
+        let spectrumWidth: CGFloat = 30
+        
+        if showLabel {
+            // Resize label to fit content
+            sampleRateLabel.sizeToFit()
+            let labelWidth = sampleRateLabel.frame.width
+            
+            let totalWidth = leftPadding + spectrumWidth + spacing + labelWidth + rightPadding
+            button.frame = NSRect(x: 0, y: 0, width: totalWidth, height: 22)
+            
+            menuBarSpectrumView.frame.origin.x = leftPadding
+            sampleRateLabel.frame.origin.x = leftPadding + spectrumWidth + spacing
+            // Center Vertically
+            sampleRateLabel.frame.origin.y = (22 - sampleRateLabel.frame.height) / 2
+        } else {
+            // Only Spectrum
+            let totalWidth = leftPadding + spectrumWidth + rightPadding
+            button.frame = NSRect(x: 0, y: 0, width: totalWidth, height: 22)
+            
+            menuBarSpectrumView.frame.origin.x = leftPadding
         }
     }
     
@@ -223,6 +289,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioInputDelegate {
         popoverView.onModeChanged = { [weak self] mode in
             self?.menuBarSpectrumView?.mode = mode 
             // 在這裡可以保留 MenuBar 簡潔模式，或者同步
+        }
+        
+        popoverView.onToggleShowSampleRate = { [weak self] enabled in
+            self?.updateStatusBarLayout()
         }
         
         viewController.view = popoverView

@@ -1,7 +1,7 @@
 import Foundation
 import ScreenCaptureKit
 import CoreMedia
-import AVFoundation
+@preconcurrency import AVFoundation
 
 protocol AudioInputDelegate: AnyObject {
     func audioInputDidReceiveBuffer(_ buffer: [Float], sampleRate: Float64, channels: Int, bitDepth: Int)
@@ -40,7 +40,12 @@ class AudioInputService: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAu
     
     func stopCapture() {
         if isUsingBlackHole {
-            captureSession?.stopRunning()
+            if let session = captureSession {
+                NotificationCenter.default.removeObserver(self, name: .AVCaptureSessionRuntimeError, object: session)
+                NotificationCenter.default.removeObserver(self, name: .AVCaptureSessionWasInterrupted, object: session)
+                NotificationCenter.default.removeObserver(self, name: .AVCaptureSessionInterruptionEnded, object: session)
+                session.stopRunning()
+            }
             captureSession = nil
         } else {
             if let stream = stream {
@@ -92,6 +97,11 @@ class AudioInputService: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAu
             
             session.commitConfiguration()
             
+            // Add Observers for Runtime Errors (e.g. Sample Rate Change)
+            NotificationCenter.default.addObserver(self, selector: #selector(handleCaptureSessionError), name: .AVCaptureSessionRuntimeError, object: session)
+            NotificationCenter.default.addObserver(self, selector: #selector(handleCaptureSessionInterruption), name: .AVCaptureSessionWasInterrupted, object: session)
+            NotificationCenter.default.addObserver(self, selector: #selector(handleCaptureSessionInterruptionEnded), name: .AVCaptureSessionInterruptionEnded, object: session)
+            
             DispatchQueue.global(qos: .userInitiated).async {
                 session.startRunning()
                 self.isRunning = true
@@ -101,6 +111,39 @@ class AudioInputService: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAu
             self.captureSession = session
         } catch {
             print("❌ Failed to create capture input: \(error)")
+        }
+    }
+    
+    @objc private func handleCaptureSessionError(_ notification: Notification) {
+        guard let error = notification.userInfo?[AVCaptureSessionErrorKey] as? AVError else { return }
+        print("⚠️ AVCaptureSession Runtime Error: \(error.localizedDescription) (Code: \(error.code.rawValue))")
+        
+        // Auto-restart mechanism for any runtime error (e.g. device format change)
+        print("♻️ Runtime Error - scheduling restart...")
+        Task {
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // Wait 1s
+            
+            guard let session = notification.object as? AVCaptureSession else { return }
+            if !session.isRunning {
+                print("♻️ Attempting to restart AVCaptureSession...")
+                DispatchQueue.global(qos: .userInitiated).async {
+                    session.startRunning()
+                }
+            }
+        }
+    }
+    
+    @objc private func handleCaptureSessionInterruption(_ notification: Notification) {
+        print("⚠️ AVCaptureSession Interrupted")
+    }
+    
+    @objc private func handleCaptureSessionInterruptionEnded(_ notification: Notification) {
+        print("✅ AVCaptureSession Interruption Ended - Resuming...")
+        guard let session = notification.object as? AVCaptureSession else { return }
+        if !session.isRunning {
+            DispatchQueue.global(qos: .userInitiated).async {
+                session.startRunning()
+            }
         }
     }
     

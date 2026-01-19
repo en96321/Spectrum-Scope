@@ -69,12 +69,17 @@ class LogMonitor {
         }
     }
     
+    // Cache the regex to avoid recompilation overhead
+    private static let sampleRateRegex: NSRegularExpression? = {
+        let pattern = #"sampleRate[:\s=]+(\d+)"#
+        return try? NSRegularExpression(pattern: pattern)
+    }()
+
     private func extractSampleRate(from text: String) -> Int? {
         // Regex to look for "sampleRate:(\d+)" or "sampleRate = (\d+)"
         // The user log specifically shows "sampleRate:96000"
-        let pattern = #"sampleRate[:\s=]+(\d+)"#
         
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        guard let regex = LogMonitor.sampleRateRegex else { return nil }
         let nsString = text as NSString
         let results = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
         

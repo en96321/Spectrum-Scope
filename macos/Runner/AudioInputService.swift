@@ -1,6 +1,7 @@
 import Foundation
 import ScreenCaptureKit
 import CoreMedia
+import Accelerate
 @preconcurrency import AVFoundation
 
 protocol AudioInputDelegate: AnyObject {
@@ -223,7 +224,7 @@ class AudioInputService: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAu
             return
         }
         
-        // 3. Extract and Mix Samples
+        // 3. Extract and Mix Samples using vDSP
         let bufferCount = Int(audioBufferListPtr.baseAddress!.pointee.mNumberBuffers)
         let channels = Int(asbd.mChannelsPerFrame)
         let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
@@ -246,26 +247,26 @@ class AudioInputService: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAu
                 guard let data = buffer.mData else { continue }
                 
                 if isFloat {
-                    // Float32
+                    // Float32 - Use vDSP for vectorized addition
                     let ptr = data.bindMemory(to: Float.self, capacity: frameCount)
-                    for j in 0..<frameCount {
-                        floatSamples[j] += ptr[j]
-                    }
+                    vDSP_vadd(floatSamples, 1, ptr, 1, &floatSamples, 1, vDSP_Length(frameCount))
                 } else {
-                    // Int16
+                    // Int16 - Convert to Float then add using vDSP
                     let ptr = data.bindMemory(to: Int16.self, capacity: frameCount)
-                    for j in 0..<frameCount {
-                        floatSamples[j] += Float(ptr[j]) / Float(Int16.max)
-                    }
+                    var tempFloats = [Float](repeating: 0, count: frameCount)
+                    vDSP_vflt16(ptr, 1, &tempFloats, 1, vDSP_Length(frameCount))
+                    // Normalize to -1.0...1.0
+                    var scale = Float(1.0 / Float(Int16.max))
+                    vDSP_vsmul(tempFloats, 1, &scale, &tempFloats, 1, vDSP_Length(frameCount))
+                    // Add to sum
+                    vDSP_vadd(floatSamples, 1, tempFloats, 1, &floatSamples, 1, vDSP_Length(frameCount))
                 }
             }
             
-            // Average the mix
+            // Average the mix using vDSP
             if buffers.count > 0 {
-                let div = Float(buffers.count)
-                for j in 0..<frameCount {
-                    floatSamples[j] /= div
-                }
+                var div = Float(buffers.count)
+                vDSP_vsdiv(floatSamples, 1, &div, &floatSamples, 1, vDSP_Length(frameCount))
             }
         } // End withUnsafePointer
         

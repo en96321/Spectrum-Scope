@@ -116,11 +116,10 @@ class SpectrumAnalyzer {
     func calculateVolumeDb(_ audioData: [Float]) -> Float {
         guard !audioData.isEmpty else { return -60 }
         
-        var sumSquares: Float = 0
-        for sample in audioData {
-            sumSquares += sample * sample
-        }
-        let rms = sqrt(sumSquares / Float(audioData.count))
+        // Use vDSP for vectorized RMS calculation
+        var rms: Float = 0
+        vDSP_rmsqv(audioData, 1, &rms, vDSP_Length(audioData.count))
+        
         let db = 20 * log10(rms + 1e-10)
         return max(-60, min(0, db))
     }
@@ -128,12 +127,12 @@ class SpectrumAnalyzer {
     func calculatePeakDb(_ audioData: [Float]) -> Float {
         guard !audioData.isEmpty else { return -60 }
         
+        // Use vDSP for vectorized max magnitude calculation
         var peak: Float = 0
-        for sample in audioData {
-            let abs = Swift.abs(sample)
-            if abs > peak { peak = abs }
-        }
+        vDSP_maxmgv(audioData, 1, &peak, vDSP_Length(audioData.count))
+        
         let db = 20 * log10(peak + 1e-10)
         return max(-60, min(0, db))
     }
 }
+

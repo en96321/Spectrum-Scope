@@ -190,7 +190,6 @@ class MiniSpectrumView: NSView {
             let y: CGFloat = 0
             
             let color = getColorForHeight(normalizedHeight)
-            context.setShadow(offset: .zero, blur: 3, color: color.withAlphaComponent(0.5).cgColor)
             context.setFillColor(color.cgColor)
             let rect = CGRect(x: x, y: y, width: actualBarWidth, height: barHeight)
             context.fill(rect)
@@ -220,7 +219,6 @@ class MiniSpectrumView: NSView {
         
         context.addPath(path)
         context.setStrokeColor(gradientColors[2].cgColor)
-        context.setShadow(offset: .zero, blur: 4, color: gradientColors[2].withAlphaComponent(0.6).cgColor)
         context.strokePath()
     }
     
@@ -248,7 +246,6 @@ class MiniSpectrumView: NSView {
             context.setStrokeColor(color.cgColor)
             context.setLineWidth(3)
             context.setLineCap(.round)
-            context.setShadow(offset: .zero, blur: 2, color: color.withAlphaComponent(0.5).cgColor)
             
             context.move(to: CGPoint(x: startX, y: startY))
             context.addLine(to: CGPoint(x: endX, y: endY))
@@ -293,7 +290,6 @@ class MiniSpectrumView: NSView {
             let x = CGFloat(index) * barWidth + spacing / 2
             let color = getColorForHeight(normalizedHeight)
             context.setFillColor(color.cgColor)
-            context.setShadow(offset: .zero, blur: 3, color: color.withAlphaComponent(0.5).cgColor)
             context.fill(CGRect(x: x, y: midY, width: actualBarWidth, height: barHeight))
             context.fill(CGRect(x: x, y: midY - barHeight, width: actualBarWidth, height: barHeight))
         }
@@ -348,8 +344,14 @@ class MenuBarSpectrumView: NSView {
     private var spectrum: [Float] = []
     private let barCount = 5
     var mode: VisualizationMode = .bars {
-        didSet { needsDisplay = true }
+        didSet { 
+            rebuildLayers()
+            updateLayers()
+        }
     }
+    
+    // CALayer-based rendering for GPU acceleration
+    private var barLayers: [CALayer] = []
     
     private let gradientColors: [NSColor] = [
         NSColor(red: 0, green: 0.898, blue: 1, alpha: 1),
@@ -361,62 +363,106 @@ class MenuBarSpectrumView: NSView {
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        wantsLayer = true
+        setupView()
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        setupView()
+    }
+    
+    private func setupView() {
         wantsLayer = true
+        layer?.masksToBounds = true
+        rebuildLayers()
+    }
+    
+    private func rebuildLayers() {
+        // Remove existing layers
+        barLayers.forEach { $0.removeFromSuperlayer() }
+        barLayers.removeAll()
+        
+        // Create new layers based on mode
+        let count: Int
+        switch mode {
+        case .bars, .mirror: count = barCount
+        case .wave: count = 1 // Single shape layer for wave
+        case .circular: count = 12
+        case .blocks: count = 5 * 4 // columns * rows
+        }
+        
+        for _ in 0..<count {
+            let barLayer = CALayer()
+            barLayer.anchorPoint = CGPoint(x: 0.5, y: 0)
+            layer?.addSublayer(barLayer)
+            barLayers.append(barLayer)
+        }
     }
     
     func updateSpectrum(_ newSpectrum: [Float]) {
         spectrum = newSpectrum
-        needsDisplay = true
+        // Use CATransaction to disable implicit animations for smoother updates
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        updateLayers()
+        CATransaction.commit()
     }
     
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
+    private func updateLayers() {
         switch mode {
-        case .bars: drawBars(context)
-        case .wave: drawWave(context)
-        case .circular: drawCircular(context)
-        case .blocks: drawBlocks(context)
-        case .mirror: drawMirror(context)
+        case .bars: updateBarsLayers()
+        case .wave: updateWaveLayers()
+        case .circular: updateCircularLayers()
+        case .blocks: updateBlocksLayers()
+        case .mirror: updateMirrorLayers()
         }
     }
     
-    private func drawBars(_ context: CGContext) {
+    private func updateBarsLayers() {
         let barWidth = bounds.width / CGFloat(barCount)
         let spacing: CGFloat = 1
         let actualBarWidth = barWidth - spacing
         let sampledSpectrum: [Float] = spectrum.isEmpty ? [-60, -50, -40, -50, -60] : resampleSpectrum(spectrum, targetCount: barCount)
         
         for (index, value) in sampledSpectrum.enumerated() {
+            guard index < barLayers.count else { break }
             let normalizedHeight = CGFloat((value + 80) / 80).clamped(to: 0...1)
             let barHeight = max(2, bounds.height * normalizedHeight)
             let x = CGFloat(index) * barWidth + spacing / 2
             let y = (bounds.height - barHeight) / 2
             
-            let color = getColorForHeight(normalizedHeight)
-            context.setFillColor(color.cgColor)
-            context.fill(CGRect(x: x, y: y, width: actualBarWidth, height: barHeight))
+            let layer = barLayers[index]
+            layer.frame = CGRect(x: x, y: y, width: actualBarWidth, height: barHeight)
+            layer.backgroundColor = getColorForHeight(normalizedHeight).cgColor
         }
     }
     
-    private func drawWave(_ context: CGContext) {
-        let sampledSpectrum: [Float] = spectrum.isEmpty ? [-60, -60, -60] : resampleSpectrum(spectrum, targetCount: Int(bounds.width / 2))
+    private func updateWaveLayers() {
+        guard barLayers.count > 0, let shapeLayer = barLayers[0] as? CALayer else { return }
         
-        context.setLineWidth(1.5)
+        // For wave, we need a CAShapeLayer - recreate if needed
+        if !(shapeLayer is CAShapeLayer) {
+            barLayers.forEach { $0.removeFromSuperlayer() }
+            barLayers.removeAll()
+            let waveLayer = CAShapeLayer()
+            waveLayer.fillColor = nil
+            waveLayer.strokeColor = gradientColors[2].cgColor
+            waveLayer.lineWidth = 1.5
+            layer?.addSublayer(waveLayer)
+            barLayers.append(waveLayer)
+        }
+        
+        guard let waveLayer = barLayers.first as? CAShapeLayer else { return }
+        
+        let sampledSpectrum: [Float] = spectrum.isEmpty ? [-60, -60, -60] : resampleSpectrum(spectrum, targetCount: Int(bounds.width / 2))
         let path = CGMutablePath()
         let width = bounds.width
         let height = bounds.height
         let count = sampledSpectrum.count
         let midY = height / 2
-        path.move(to: CGPoint(x: 0, y: midY))
         
         for (i, value) in sampledSpectrum.enumerated() {
-            let x = width * CGFloat(i) / CGFloat(count - 1)
+            let x = width * CGFloat(i) / CGFloat(max(1, count - 1))
             let normalizedHeight = CGFloat((value + 80) / 80).clamped(to: 0...1)
             let amplitude = (height / 2) * normalizedHeight
             let y = midY - amplitude
@@ -424,13 +470,11 @@ class MenuBarSpectrumView: NSView {
             else { path.addLine(to: CGPoint(x: x, y: y)) }
         }
         
-        context.addPath(path)
-        context.setStrokeColor(gradientColors[2].cgColor)
-        context.strokePath()
+        waveLayer.path = path
+        waveLayer.frame = bounds
     }
     
-    private func drawCircular(_ context: CGContext) {
-        // Optimized for small view: Simple radial bars
+    private func updateCircularLayers() {
         let pointCount = 12
         let sampledSpectrum: [Float] = spectrum.isEmpty ? Array(repeating: -60, count: pointCount) : resampleSpectrum(spectrum, targetCount: pointCount)
         
@@ -439,29 +483,26 @@ class MenuBarSpectrumView: NSView {
         let minRadius = maxRadius * 0.4
         let angleStep = (2 * CGFloat.pi) / CGFloat(pointCount)
         
-        context.setLineWidth(2)
-        context.setLineCap(.round)
-        
         for (i, value) in sampledSpectrum.enumerated() {
+            guard i < barLayers.count else { break }
             let normalizedHeight = CGFloat((value + 80) / 80).clamped(to: 0...1)
-            let barLength = (maxRadius - minRadius) * normalizedHeight
+            let barLength = max(1, (maxRadius - minRadius) * normalizedHeight)
             let angle = CGFloat(i) * angleStep - CGFloat.pi / 2
             
+            let layer = barLayers[i]
+            layer.backgroundColor = getColorForHeight(normalizedHeight).cgColor
+            layer.cornerRadius = 1
+            
+            // Position and rotate the layer
             let startX = center.x + cos(angle) * minRadius
             let startY = center.y + sin(angle) * minRadius
-            let endX = center.x + cos(angle) * (minRadius + barLength)
-            let endY = center.y + sin(angle) * (minRadius + barLength)
-            
-            let color = getColorForHeight(normalizedHeight)
-            context.setStrokeColor(color.cgColor)
-            context.move(to: CGPoint(x: startX, y: startY))
-            context.addLine(to: CGPoint(x: endX, y: endY))
-            context.strokePath()
+            layer.frame = CGRect(x: startX - 1, y: startY, width: 2, height: barLength)
+            layer.anchorPoint = CGPoint(x: 0.5, y: 0)
+            layer.transform = CATransform3DMakeRotation(angle + CGFloat.pi / 2, 0, 0, 1)
         }
     }
     
-    private func drawBlocks(_ context: CGContext) {
-        // Optimized 3x3 grid for small view
+    private func updateBlocksLayers() {
         let columns = 5
         let rows = 4
         let sampledSpectrum: [Float] = spectrum.isEmpty ? Array(repeating: -60, count: columns) : resampleSpectrum(spectrum, targetCount: columns)
@@ -469,24 +510,32 @@ class MenuBarSpectrumView: NSView {
         let blockH = bounds.height / CGFloat(rows)
         let spacing: CGFloat = 1.5
         
+        var layerIndex = 0
         for (col, value) in sampledSpectrum.enumerated() {
             let normalizedHeight = CGFloat((value + 80) / 80).clamped(to: 0...1)
             let activeRows = max(1, Int(normalizedHeight * CGFloat(rows)))
             
-            for row in 0..<activeRows {
-                let x = CGFloat(col) * blockW + spacing / 2
-                // Draw from bottom up
-                let y = (bounds.height - blockH * CGFloat(rows)) / 2 + CGFloat(row) * blockH + spacing / 2
+            for row in 0..<rows {
+                guard layerIndex < barLayers.count else { break }
+                let layer = barLayers[layerIndex]
                 
-                let heightRatio = CGFloat(row) / CGFloat(rows)
-                let color = getColorForHeight(heightRatio)
-                context.setFillColor(color.cgColor)
-                context.fill(CGRect(x: x, y: y, width: blockW - spacing, height: blockH - spacing))
+                if row < activeRows {
+                    let x = CGFloat(col) * blockW + spacing / 2
+                    let y = (bounds.height - blockH * CGFloat(rows)) / 2 + CGFloat(row) * blockH + spacing / 2
+                    let heightRatio = CGFloat(row) / CGFloat(rows)
+                    
+                    layer.frame = CGRect(x: x, y: y, width: blockW - spacing, height: blockH - spacing)
+                    layer.backgroundColor = getColorForHeight(heightRatio).cgColor
+                    layer.isHidden = false
+                } else {
+                    layer.isHidden = true
+                }
+                layerIndex += 1
             }
         }
     }
     
-    private func drawMirror(_ context: CGContext) {
+    private func updateMirrorLayers() {
         let barCountMirror = 5
         let barWidth = bounds.width / CGFloat(barCountMirror)
         let spacing: CGFloat = 1
@@ -494,19 +543,41 @@ class MenuBarSpectrumView: NSView {
         let sampledSpectrum: [Float] = spectrum.isEmpty ? [-60, -50, -40, -50, -60] : resampleSpectrum(spectrum, targetCount: barCountMirror)
         let midY = bounds.midY
         
+        // Need 2 layers per bar (top + bottom) - rebuild if needed
+        if barLayers.count < barCountMirror * 2 {
+            rebuildMirrorLayers()
+        }
+        
         for (index, value) in sampledSpectrum.enumerated() {
             let normalizedHeight = CGFloat((value + 80) / 80).clamped(to: 0...1)
-            // Reduced height for mirror effect to fit in bar
-            let barHeight = (bounds.height / 2) * normalizedHeight * 0.9 
-            
+            let barHeight = (bounds.height / 2) * normalizedHeight * 0.9
             let x = CGFloat(index) * barWidth + spacing / 2
-            let color = getColorForHeight(normalizedHeight)
-            context.setFillColor(color.cgColor)
+            let color = getColorForHeight(normalizedHeight).cgColor
             
             // Top bar
-            context.fill(CGRect(x: x, y: midY, width: actualBarWidth, height: barHeight))
+            let topIndex = index * 2
+            if topIndex < barLayers.count {
+                barLayers[topIndex].frame = CGRect(x: x, y: midY, width: actualBarWidth, height: barHeight)
+                barLayers[topIndex].backgroundColor = color
+            }
+            
             // Bottom bar
-            context.fill(CGRect(x: x, y: midY - barHeight, width: actualBarWidth, height: barHeight))
+            let bottomIndex = index * 2 + 1
+            if bottomIndex < barLayers.count {
+                barLayers[bottomIndex].frame = CGRect(x: x, y: midY - barHeight, width: actualBarWidth, height: barHeight)
+                barLayers[bottomIndex].backgroundColor = color
+            }
+        }
+    }
+    
+    private func rebuildMirrorLayers() {
+        barLayers.forEach { $0.removeFromSuperlayer() }
+        barLayers.removeAll()
+        
+        for _ in 0..<(barCount * 2) {
+            let barLayer = CALayer()
+            layer?.addSublayer(barLayer)
+            barLayers.append(barLayer)
         }
     }
     
@@ -546,6 +617,7 @@ class MenuBarSpectrumView: NSView {
         return result
     }
 }
+
 
 // MARK: - FullPopoverView
 

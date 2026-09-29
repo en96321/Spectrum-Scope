@@ -51,29 +51,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioInputDelegate {
     // MARK: - Onboarding Logic
     
     private func checkOnboarding() {
-        // 檢查 BlackHole 驅動是否存在
-        if AudioDeviceController.shared.findDevice(byName: "BlackHole") != nil {
-            // ✅ BlackHole 存在，正常啟動
-            UserDefaults.standard.set(true, forKey: "OnboardingCompleted")
-            startAudioCapture()
-        } else {
-            // ❌ BlackHole 缺失，跳出警告
-            showMissingBlackHoleAlert()
-        }
-    }
-    
-    private func showMissingBlackHoleAlert() {
-        let alert = NSAlert()
-        alert.messageText = "未偵測到 BlackHole 驅動"
-        alert.informativeText = "Audio Scope 需要 BlackHole 虛擬音訊驅動才能正常運作。\n\n請打開終端機並執行以下指令安裝：\nbrew install blackhole-2ch\n\n安裝完成後請重新啟動本程式。"
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "結束 App")
-        
-        // 顯示 Alert (Modal)
-        alert.runModal()
-        
-        // 用戶點擊結束後，關閉程式
-        NSApp.terminate(nil)
+        // Process Tap 不需要任何驅動；BlackHole 若有安裝則作為備援
+        UserDefaults.standard.set(true, forKey: "OnboardingCompleted")
+        startAudioCapture()
     }
 
     private func showOnboarding() {
@@ -104,9 +84,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioInputDelegate {
     }
     
     private func startAudioCapture() {
-        Task {
-            await audioInput.startCapture()
-        }
+        audioInput.startCapture()
     }
     
     // MARK: - Lossless Switcher Logic
@@ -129,7 +107,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioInputDelegate {
         print("🔄 Lossless Switcher: Switching to \(rate) Hz")
         self.lastDetectedSampleRate = rate
         
-        // 1. 查找 BlackHole 設備 (必選，因為我們要錄音)
+        // 1. 查找 BlackHole 設備 (選用：有安裝才同步，避免備援路徑發生 SRC)
         if let blackHoleID = AudioDeviceController.shared.findDevice(byName: "BlackHole") {
             _ = AudioDeviceController.shared.setSampleRate(deviceID: blackHoleID, rate: Float64(rate))
         }
@@ -147,13 +125,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioInputDelegate {
                 _ = AudioDeviceController.shared.setSampleRate(deviceID: defaultID, rate: Float64(rate))
             }
         }
-        
-        // 3. 重啟音訊捕獲以應用新的採樣率
-        print("♻️ Restarting Capture to apply \(rate) Hz...")
-        Task {
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-            await audioInput.startCapture()
-        }
+
+        // 3. 不在這裡重啟擷取：setSampleRate 是非同步的，固定延遲會搶在 DAC 切完前重建而讀到舊採樣率。
+        //    擷取來源自己監聽裝置採樣率變更，在實際生效時才重建。
     }
     
     // Rate Limiting
@@ -224,7 +198,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, AudioInputDelegate {
             sampleRateLabel = NSTextField(frame: NSRect(x: 32, y: 5, width: 34, height: 12)) 
             sampleRateLabel.stringValue = ""
             sampleRateLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
-            sampleRateLabel.textColor = NSColor.secondaryLabelColor
+            sampleRateLabel.textColor = NSColor.labelColor
             sampleRateLabel.isBezeled = false
             sampleRateLabel.drawsBackground = false
             sampleRateLabel.isEditable = false

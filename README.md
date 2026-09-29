@@ -26,7 +26,7 @@
 
 ### 🎵 Lossless Switcher (無損切換)
 *   **自動偵測**: 監聽 Apple Music 播放日誌，識別 44.1kHz 至 192kHz 的採樣率變化。
-*   **同步切換**: 自動將 **BlackHole** 及您的 **DAC (外部輸出裝置)** 切換至對應採樣率，避免系統強制 SRC (Sample Rate Conversion) 造成的音質減損。
+*   **同步切換**: 自動將您的 **DAC (外部輸出裝置)** 切換至對應採樣率（若有安裝 BlackHole 也會一併同步），避免系統強制 SRC (Sample Rate Conversion) 造成的音質減損。
 
 ### 📊 專業頻譜分析
 *   **即時 FFT**: 基於 vDSP 的高效能頻譜分析。
@@ -45,17 +45,17 @@
 
 ## 🛠️ 安裝前準備
 
-本專案依賴虛擬音訊驅動來擷取系統聲音。
+**不需要安裝任何虛擬音訊驅動。** 本專案使用 macOS 14.2+ 的 **Core Audio Process Tap** 直接擷取系統音訊，採樣率跟隨您目前的輸出裝置。
 
-### 1. 安裝 BlackHole (必要)
-請打開終端機 (Terminal) 安裝 **BlackHole 2ch**：
+*   **系統需求**: macOS 14.2 以上。
+*   **權限**: 首次啟動時系統會詢問「系統音訊錄製」權限，請允許；若拒絕，頻譜會完全沒有動靜，可到「系統設定 → 隱私權與安全性 → 螢幕與系統錄音」重新開啟。
+
+### (選用) BlackHole 備援
+若 Process Tap 無法建立，App 會自動改用已安裝的 **BlackHole**。此時需要在「音訊 MIDI 設定」建立「多重輸出裝置」，同時勾選 **DAC/耳機** 與 **BlackHole 2ch**：
 
 ```bash
 brew install blackhole-2ch
 ```
-
-### 2. (選用) 設定多重輸出裝置
-為了在聽音樂的同時進行視覺化，建議在「音訊 MIDI 設定 (Audio MIDI Setup)」中建立一個「多重輸出裝置 (Multi-Output Device)」，同時勾選您的 **DAC/耳機** 和 **BlackHole 2ch**。
 
 ## 📦 下載與執行
 
@@ -88,7 +88,7 @@ Beyond beautiful real-time spectrum analysis, its core feature is the **Lossless
 
 ### 🎵 Lossless Switcher
 *   **Auto Detection**: Monitors Apple Music logs to detect sample rate changes from 44.1kHz to 192kHz.
-*   **Sync Switching**: Automatically switches **BlackHole** and your **DAC (External Output)** to the matching sample rate, preventing sound degradation caused by system SRC (Sample Rate Conversion).
+*   **Sync Switching**: Automatically switches your **DAC (External Output)** to the matching sample rate (and BlackHole too, if installed), preventing sound degradation caused by system SRC (Sample Rate Conversion).
 
 ### 📊 Pro Spectrum Analysis
 *   **Real-time FFT**: High-performance spectrum analysis based on vDSP.
@@ -107,17 +107,17 @@ Beyond beautiful real-time spectrum analysis, its core feature is the **Lossless
 
 ## 🛠️ Prerequisites
 
-This project relies on a virtual audio driver to capture system audio.
+**No virtual audio driver required.** The app captures system audio with the **Core Audio Process Tap** API (macOS 14.2+), at the sample rate of your current output device.
 
-### 1. Install BlackHole (Required)
-Install **BlackHole 2ch** via terminal:
+*   **Requirement**: macOS 14.2 or later.
+*   **Permission**: On first launch macOS asks for "System Audio Recording" permission. If denied, the spectrum stays flat; re-enable it in System Settings → Privacy & Security → Screen & System Audio Recording.
+
+### (Optional) BlackHole Fallback
+If the Process Tap cannot be created, the app falls back to an installed **BlackHole** device. In that case, create a "Multi-Output Device" in **Audio MIDI Setup** with both your **DAC/Headphones** and **BlackHole 2ch**:
 
 ```bash
 brew install blackhole-2ch
 ```
-
-### 2. (Optional) Multi-Output Device
-To listen to music while visualizing it, it is recommended to create a "Multi-Output Device" in **Audio MIDI Setup**, checking both your **DAC/Headphones** and **BlackHole 2ch**.
 
 ## 📦 Build & Run
 

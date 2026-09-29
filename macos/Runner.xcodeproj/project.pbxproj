@@ -26,6 +26,8 @@
 		1E7FD6F72F19F75C00E2B006 /* LogMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD6F02F19F75C00E2B006 /* LogMonitor.swift */; };
 		1E7FD6F82F19F75C00E2B006 /* VisualizerViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD6F42F19F75C00E2B006 /* VisualizerViews.swift */; };
 		1E7FD6F92F19F75C00E2B006 /* AudioInputService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD6EF2F19F75C00E2B006 /* AudioInputService.swift */; };
+		1E7FD7012F19F75C00E2B006 /* ProcessTapCaptureSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD7002F19F75C00E2B006 /* ProcessTapCaptureSource.swift */; };
+		1E7FD7032F19F75C00E2B006 /* BlackHoleCaptureSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD7022F19F75C00E2B006 /* BlackHoleCaptureSource.swift */; };
 		1E7FD6FA2F19F75C00E2B006 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD6F12F19F75C00E2B006 /* AppDelegate.swift */; };
 		1E7FD6FB2F19F75C00E2B006 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD6F22F19F75C00E2B006 /* OnboardingView.swift */; };
 		1E7FD6FC2F19F75C00E2B006 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7FD6FD2F19F75C00E2B006 /* SettingsManager.swift */; };
@@ -70,6 +72,8 @@
 /* Begin PBXFileReference section */
 		1E7FD6EE2F19F75C00E2B006 /* AudioDeviceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDeviceController.swift; sourceTree = "<group>"; };
 		1E7FD6EF2F19F75C00E2B006 /* AudioInputService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioInputService.swift; sourceTree = "<group>"; };
+		1E7FD7002F19F75C00E2B006 /* ProcessTapCaptureSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTapCaptureSource.swift; sourceTree = "<group>"; };
+		1E7FD7022F19F75C00E2B006 /* BlackHoleCaptureSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlackHoleCaptureSource.swift; sourceTree = "<group>"; };
 		1E7FD6F02F19F75C00E2B006 /* LogMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogMonitor.swift; sourceTree = "<group>"; };
 		1E7FD6F12F19F75C00E2B006 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		1E7FD6F22F19F75C00E2B006 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
@@ -206,6 +210,8 @@
 				33BA886A226E78AF003329D5 /* Configs */,
 				1E7FD6EE2F19F75C00E2B006 /* AudioDeviceController.swift */,
 				1E7FD6EF2F19F75C00E2B006 /* AudioInputService.swift */,
+				1E7FD7002F19F75C00E2B006 /* ProcessTapCaptureSource.swift */,
+				1E7FD7022F19F75C00E2B006 /* BlackHoleCaptureSource.swift */,
 				1E7FD6F02F19F75C00E2B006 /* LogMonitor.swift */,
 				1E7FD6F12F19F75C00E2B006 /* AppDelegate.swift */,
 				1E7FD6F22F19F75C00E2B006 /* OnboardingView.swift */,
@@ -383,6 +389,8 @@
 				1E7FD6F72F19F75C00E2B006 /* LogMonitor.swift in Sources */,
 				1E7FD6F82F19F75C00E2B006 /* VisualizerViews.swift in Sources */,
 				1E7FD6F92F19F75C00E2B006 /* AudioInputService.swift in Sources */,
+				1E7FD7012F19F75C00E2B006 /* ProcessTapCaptureSource.swift in Sources */,
+				1E7FD7032F19F75C00E2B006 /* BlackHoleCaptureSource.swift in Sources */,
 				1E7FD6FA2F19F75C00E2B006 /* AppDelegate.swift in Sources */,
 				1E7FD6FB2F19F75C00E2B006 /* OnboardingView.swift in Sources */,
 				1E7FD6FC2F19F75C00E2B006 /* SettingsManager.swift in Sources */,

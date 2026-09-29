@@ -169,10 +169,19 @@ class AudioDeviceController {
         
         return false
     }
+    // 讀取設備 UID (建立 Aggregate Device 時需要)
+    func getDeviceUID(id: AudioObjectID) -> String? {
+        return getStringProperty(id: id, selector: kAudioDevicePropertyDeviceUID)
+    }
+
     private func getDeviceName(id: AudioObjectID) -> String? {
+        return getStringProperty(id: id, selector: kAudioDevicePropertyDeviceNameCFString)
+    }
+
+    private func getStringProperty(id: AudioObjectID, selector: AudioObjectPropertySelector) -> String? {
         var deviceName: CFString = "" as CFString
         var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceNameCFString,
+            mSelector: selector,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )

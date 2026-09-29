@@ -1,284 +1,162 @@
 import Foundation
-import ScreenCaptureKit
-import CoreMedia
+import CoreAudio
 import Accelerate
-@preconcurrency import AVFoundation
 
 protocol AudioInputDelegate: AnyObject {
     func audioInputDidReceiveBuffer(_ buffer: [Float], sampleRate: Float64, channels: Int, bitDepth: Int)
 }
 
-class AudioInputService: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
-    
+/// 音訊擷取來源的共同介面。
+/// `onBuffer` 收到的 AudioBuffer 只在 callback 期間有效，不可保留指標。
+protocol AudioCaptureSource: AnyObject {
+    var name: String { get }
+    var onBuffer: ((_ buffers: [AudioBuffer], _ format: AudioStreamBasicDescription) -> Void)? { get set }
+    /// 來源失效（格式/裝置變更、runtime error）時通知，由協調者決定是否重建
+    var onInvalidated: (() -> Void)? { get set }
+    func start() throws
+    func stop()
+}
+
+struct AudioCaptureError: Error, CustomStringConvertible {
+    let operation: String
+    let status: OSStatus
+
+    var description: String { "\(operation) failed (OSStatus \(status))" }
+
+    static func check(_ status: OSStatus, _ operation: String) throws {
+        guard status == noErr else { throw AudioCaptureError(operation: operation, status: status) }
+    }
+}
+
+/// 協調者：依優先序挑選可用的擷取來源，並把 PCM 混成 mono 交給 delegate。
+///   1. Core Audio Process Tap（macOS 14.2+，不需虛擬驅動）
+///   2. BlackHole（已安裝時的備援）
+final class AudioInputService {
+
     weak var delegate: AudioInputDelegate?
-    
-    private var captureSession: AVCaptureSession?
-    private var isUsingBlackHole = false
-    private var stream: SCStream?
-    private let videoSampleBufferQueue = DispatchQueue(label: "com.pedro.audio_scope.VideoSampleBufferQueue")
-    
+
     private(set) var isRunning = false
-    private(set) var currentSampleRate: Float64 = 48000
-    private var lastFormatSampleRate: Float64 = 0
-    private var hasLoggedFormat = false
-    
-    override init() {
-        super.init()
-    }
-    
-    func startCapture() async {
+    private(set) var activeSourceName: String?
+
+    private var source: AudioCaptureSource?
+    private var pendingRestart: DispatchWorkItem?
+
+    /// 各來源每次 callback 的 frame 數不同（Process Tap 約 512），
+    /// 累積成固定長度的滑動視窗，讓 FFT (2048 點) 永遠拿到完整資料
+    private let analysisWindowSize = 2048
+    private var analysisWindow: [Float] = []
+    private let sourceFactories: [() -> AudioCaptureSource] = [
+        { ProcessTapCaptureSource() },
+        { BlackHoleCaptureSource() },
+    ]
+
+    func startCapture() {
         stopCapture()
-        
-        if let blackHoleDevice = findBlackHoleDevice() {
-            print("✅ Found BlackHole: \(blackHoleDevice.localizedName)")
-            startCoreAudioCapture(device: blackHoleDevice)
-            return
+        analysisWindow.removeAll(keepingCapacity: true)
+
+        for makeSource in sourceFactories {
+            let candidate = makeSource()
+            candidate.onBuffer = { [weak self] buffers, format in
+                self?.handle(buffers: buffers, format: format)
+            }
+            candidate.onInvalidated = { [weak self] in
+                print("♻️ \(candidate.name) invalidated - scheduling restart...")
+                self?.restartCapture()
+            }
+
+            do {
+                try candidate.start()
+                source = candidate
+                activeSourceName = candidate.name
+                isRunning = true
+                print("✅ Audio capture started via \(candidate.name)")
+                return
+            } catch {
+                print("⚠️ \(candidate.name) unavailable: \(error)")
+            }
         }
-        
-        print("⚠️ BlackHole not found, falling back to ScreenCaptureKit")
-        await startScreenCapture()
+
+        print("❌ No audio capture source available")
     }
-    
+
     func stopCapture() {
-        if isUsingBlackHole {
-            if let session = captureSession {
-                NotificationCenter.default.removeObserver(self, name: .AVCaptureSessionRuntimeError, object: session)
-                NotificationCenter.default.removeObserver(self, name: .AVCaptureSessionWasInterrupted, object: session)
-                NotificationCenter.default.removeObserver(self, name: .AVCaptureSessionInterruptionEnded, object: session)
-                session.stopRunning()
-            }
-            captureSession = nil
-        } else {
-            if let stream = stream {
-                stream.stopCapture { error in 
-                    if let error = error { print("❌ Error stopping capture: \(error)") }
-                }
-            }
-            stream = nil
-        }
-        isRunning = false
-        print("🛑 Capture stopped")
-    }
-    
-    private func findBlackHoleDevice() -> AVCaptureDevice? {
-        // macOS 14+ replacement
-        let discoverySession: AVCaptureDevice.DiscoverySession
-        if #available(macOS 14.0, *) {
-            discoverySession = AVCaptureDevice.DiscoverySession(
-                deviceTypes: [.microphone, .external],
-                mediaType: .audio,
-                position: .unspecified
-            )
-        } else {
-            discoverySession = AVCaptureDevice.DiscoverySession(
-                deviceTypes: [.builtInMicrophone, .externalUnknown],
-                mediaType: .audio,
-                position: .unspecified
-            )
-        }
-        
-        for device in discoverySession.devices {
-            if device.localizedName.contains("BlackHole") { return device }
-        }
-        return nil
-    }
-    
-    private func startCoreAudioCapture(device: AVCaptureDevice) {
-        let session = AVCaptureSession()
-        session.beginConfiguration()
-        do {
-            let input = try AVCaptureDeviceInput(device: device)
-            if session.canAddInput(input) { session.addInput(input) }
-            else { print("❌ Cannot add BlackHole input"); return }
-            
-            let output = AVCaptureAudioDataOutput()
-            output.setSampleBufferDelegate(self, queue: videoSampleBufferQueue)
-            if session.canAddOutput(output) { session.addOutput(output) }
-            else { print("❌ Cannot add audio output"); return }
-            
-            session.commitConfiguration()
-            
-            // Add Observers for Runtime Errors (e.g. Sample Rate Change)
-            NotificationCenter.default.addObserver(self, selector: #selector(handleCaptureSessionError), name: .AVCaptureSessionRuntimeError, object: session)
-            NotificationCenter.default.addObserver(self, selector: #selector(handleCaptureSessionInterruption), name: .AVCaptureSessionWasInterrupted, object: session)
-            NotificationCenter.default.addObserver(self, selector: #selector(handleCaptureSessionInterruptionEnded), name: .AVCaptureSessionInterruptionEnded, object: session)
-            
-            DispatchQueue.global(qos: .userInitiated).async {
-                session.startRunning()
-                self.isRunning = true
-                self.isUsingBlackHole = true
-                print("✅ CoreAudio Capture Started (BlackHole)")
-            }
-            self.captureSession = session
-        } catch {
-            print("❌ Failed to create capture input: \(error)")
-        }
-    }
-    
-    @objc private func handleCaptureSessionError(_ notification: Notification) {
-        guard let error = notification.userInfo?[AVCaptureSessionErrorKey] as? AVError else { return }
-        print("⚠️ AVCaptureSession Runtime Error: \(error.localizedDescription) (Code: \(error.code.rawValue))")
-        
-        // Auto-restart mechanism for any runtime error (e.g. device format change)
-        print("♻️ Runtime Error - scheduling restart...")
-        Task {
-            try? await Task.sleep(nanoseconds: 1_000_000_000) // Wait 1s
-            
-            guard let session = notification.object as? AVCaptureSession else { return }
-            if !session.isRunning {
-                print("♻️ Attempting to restart AVCaptureSession...")
-                DispatchQueue.global(qos: .userInitiated).async {
-                    session.startRunning()
-                }
-            }
-        }
-    }
-    
-    @objc private func handleCaptureSessionInterruption(_ notification: Notification) {
-        print("⚠️ AVCaptureSession Interrupted")
-    }
-    
-    @objc private func handleCaptureSessionInterruptionEnded(_ notification: Notification) {
-        print("✅ AVCaptureSession Interruption Ended - Resuming...")
-        guard let session = notification.object as? AVCaptureSession else { return }
-        if !session.isRunning {
-            DispatchQueue.global(qos: .userInitiated).async {
-                session.startRunning()
-            }
-        }
-    }
-    
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        processSampleBuffer(sampleBuffer)
-    }
-    
-    private func startScreenCapture() async {
-        do {
-            // macOS 14+ replacement
-            // Note: For older macOS support we might need #available check but let's assume macOS 12+ for SCKit
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            guard let display = content.displays.first else { return }
-            let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-            let config = SCStreamConfiguration()
-            config.width = 2; config.height = 2
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-            config.capturesAudio = true; config.excludesCurrentProcessAudio = true; config.channelCount = 2
-            config.sampleRate = 48000
-            
-            stream = SCStream(filter: filter, configuration: config, delegate: self)
-            try stream?.addStreamOutput(self, type: .audio, sampleHandlerQueue: videoSampleBufferQueue)
-            try await stream?.startCapture()
-            isRunning = true; isUsingBlackHole = false
-            print("✅ ScreenCaptureKit Audio Capture Started")
-        } catch { print("❌ SCKit Error: \(error)") }
-    }
-    
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .audio else { return }
-        processSampleBuffer(sampleBuffer)
-    }
-    
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
-        print("❌ SCKit Stream stopped: \(error)")
+        pendingRestart?.cancel()
+        pendingRestart = nil
+        source?.stop()
+        source = nil
+        activeSourceName = nil
         isRunning = false
     }
-    
-    // MARK: - Robust Sample Buffer Processing
 
-    private func processSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        // 1. Get ASBD
-        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
-        let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)!.pointee
-        self.currentSampleRate = asbd.mSampleRate
-        
-        // Debug Log on Format Change
-        if asbd.mSampleRate != lastFormatSampleRate {
-            lastFormatSampleRate = asbd.mSampleRate
-            let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
-            let isNonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
-            print("🎵 Format: \(asbd.mSampleRate)Hz, \(asbd.mChannelsPerFrame)ch, Float:\(isFloat), NonInterleaved:\(isNonInterleaved)")
+    /// 合併短時間內的多次重啟請求（例如採樣率切換同時觸發格式與裝置變更）
+    func restartCapture(after delay: TimeInterval = 0.5) {
+        pendingRestart?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.startCapture() }
+        pendingRestart = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func handle(buffers: [AudioBuffer], format: AudioStreamBasicDescription) {
+        let samples = AudioBufferMixer.mixToMono(buffers, format: format)
+        guard !samples.isEmpty else { return }
+
+        analysisWindow.append(contentsOf: samples)
+        if analysisWindow.count > analysisWindowSize {
+            analysisWindow.removeFirst(analysisWindow.count - analysisWindowSize)
         }
 
-        // 2. Use AudioBufferList to handle Interleaved/Non-Interleaved automatically
-        var blockBuffer: CMBlockBuffer?
-        
-        let listSize = MemoryLayout<AudioBufferList>.size + MemoryLayout<AudioBuffer>.size * (Int(asbd.mChannelsPerFrame) - 1)
-        let bufferListStorage = UnsafeMutableRawBufferPointer.allocate(byteCount: listSize, alignment: MemoryLayout<AudioBufferList>.alignment)
-        defer { bufferListStorage.deallocate() }
-        
-        let audioBufferListPtr = bufferListStorage.bindMemory(to: AudioBufferList.self)
-        
-        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sampleBuffer,
-            bufferListSizeNeededOut: nil,
-            bufferListOut: audioBufferListPtr.baseAddress!,
-            bufferListSize: listSize,
-            blockBufferAllocator: kCFAllocatorDefault,
-            blockBufferMemoryAllocator: nil,
-            flags: 0,
-            blockBufferOut: &blockBuffer
+        delegate?.audioInputDidReceiveBuffer(
+            analysisWindow,
+            sampleRate: format.mSampleRate,
+            channels: Int(format.mChannelsPerFrame),
+            bitDepth: Int(format.mBitsPerChannel)
         )
-        
-        guard status == noErr else {
-            print("❌ Failed to get AudioBufferList: \(status)")
-            return
-        }
-        
-        // 3. Extract and Mix Samples using vDSP
-        let bufferCount = Int(audioBufferListPtr.baseAddress!.pointee.mNumberBuffers)
-        let channels = Int(asbd.mChannelsPerFrame)
-        let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
-        var floatSamples: [Float] = []
-        
-        // Use withUnsafePointer to avoid dangling pointer warnings
-        withUnsafePointer(to: &audioBufferListPtr.baseAddress!.pointee.mBuffers) { buffersPtr in
-            let buffers = UnsafeBufferPointer(start: buffersPtr, count: bufferCount)
-            
-            guard let firstBuffer = buffers.first, let _ = firstBuffer.mData else { return }
-            let frameCount = Int(firstBuffer.mDataByteSize) / (isFloat ? 4 : 2)
-            
-            if frameCount == 0 { return }
-            
-            // Initialize with zeroes
-            floatSamples = [Float](repeating: 0, count: frameCount)
-            
-            for i in 0..<buffers.count {
-                let buffer = buffers[i]
-                guard let data = buffer.mData else { continue }
-                
-                if isFloat {
-                    // Float32 - Use vDSP for vectorized addition
-                    let ptr = data.bindMemory(to: Float.self, capacity: frameCount)
-                    vDSP_vadd(floatSamples, 1, ptr, 1, &floatSamples, 1, vDSP_Length(frameCount))
-                } else {
-                    // Int16 - Convert to Float then add using vDSP
-                    let ptr = data.bindMemory(to: Int16.self, capacity: frameCount)
-                    var tempFloats = [Float](repeating: 0, count: frameCount)
-                    vDSP_vflt16(ptr, 1, &tempFloats, 1, vDSP_Length(frameCount))
-                    // Normalize to -1.0...1.0
-                    var scale = Float(1.0 / Float(Int16.max))
-                    vDSP_vsmul(tempFloats, 1, &scale, &tempFloats, 1, vDSP_Length(frameCount))
-                    // Add to sum
-                    vDSP_vadd(floatSamples, 1, tempFloats, 1, &floatSamples, 1, vDSP_Length(frameCount))
-                }
-            }
-            
-            // Average the mix using vDSP
-            if buffers.count > 0 {
-                var div = Float(buffers.count)
-                vDSP_vsdiv(floatSamples, 1, &div, &floatSamples, 1, vDSP_Length(frameCount))
-            }
-        } // End withUnsafePointer
-        
-        if floatSamples.isEmpty { return }
+    }
+}
 
-        // 4. Debug Check (Silence Detection)
-        if Int.random(in: 0...50) == 0 {
-            var maxVal: Float = 0
-            for s in floatSamples { if abs(s) > maxVal { maxVal = abs(s) } }
-            // Debug print if needed
+/// 將 Float32 / Int16 的 interleaved 或 non-interleaved PCM 平均混成 mono。
+enum AudioBufferMixer {
+
+    static func mixToMono(_ buffers: [AudioBuffer], format: AudioStreamBasicDescription) -> [Float] {
+        let isFloat = (format.mFormatFlags & kAudioFormatFlagIsFloat) != 0
+        let isNonInterleaved = (format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+        let bytesPerSample = Int(format.mBitsPerChannel) / 8
+
+        guard (isFloat && bytesPerSample == 4) || (!isFloat && bytesPerSample == 2),
+              let first = buffers.first else { return [] }
+
+        // 每個 buffer 內的聲道數：non-interleaved 為 1，interleaved 為 buffer 自帶的 mNumberChannels
+        let channelsPerBuffer = isNonInterleaved ? 1 : max(Int(first.mNumberChannels), 1)
+        let frameCount = Int(first.mDataByteSize) / (bytesPerSample * channelsPerBuffer)
+        guard frameCount > 0 else { return [] }
+
+        var mono = [Float](repeating: 0, count: frameCount)
+        var scratch = [Float](repeating: 0, count: frameCount)
+        var mixedChannels = 0
+
+        for buffer in buffers {
+            guard let data = buffer.mData else { continue }
+            let stride = isNonInterleaved ? 1 : max(Int(buffer.mNumberChannels), 1)
+            guard Int(buffer.mDataByteSize) >= frameCount * stride * bytesPerSample else { continue }
+
+            for channel in 0..<stride {
+                if isFloat {
+                    let ptr = data.assumingMemoryBound(to: Float.self) + channel
+                    vDSP_vadd(mono, 1, ptr, vDSP_Stride(stride), &mono, 1, vDSP_Length(frameCount))
+                } else {
+                    let ptr = data.assumingMemoryBound(to: Int16.self) + channel
+                    vDSP_vflt16(ptr, vDSP_Stride(stride), &scratch, 1, vDSP_Length(frameCount))
+                    var scale = 1.0 / Float(Int16.max)
+                    vDSP_vsmul(scratch, 1, &scale, &scratch, 1, vDSP_Length(frameCount))
+                    vDSP_vadd(mono, 1, scratch, 1, &mono, 1, vDSP_Length(frameCount))
+                }
+                mixedChannels += 1
+            }
         }
-        
-        delegate?.audioInputDidReceiveBuffer(floatSamples, sampleRate: asbd.mSampleRate, channels: channels, bitDepth: 32)
+
+        guard mixedChannels > 0 else { return [] }
+        var divisor = Float(mixedChannels)
+        vDSP_vsdiv(mono, 1, &divisor, &mono, 1, vDSP_Length(frameCount))
+        return mono
     }
 }
